@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 
 	"orcc/config"
+	"orcc/models"
 	"orcc/runner"
 )
 
@@ -23,6 +25,8 @@ func main() {
 		printHelp()
 	case "claude":
 		runClaude(os.Args[2:])
+	case "models":
+		listModels(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", os.Args[1])
 		printHelp()
@@ -35,10 +39,48 @@ func printHelp() {
 
 Usage:
   orcc claude [args...]   Start Claude Code via OpenRouter (all args passed to claude)
+  orcc models             List available OpenRouter models (pipes to fzf if installed)
   orcc help               Show this help
 
 Config: ~/.config/orcc/config.yaml
 `, version)
+}
+
+func listModels(_ []string) {
+	cfgPath, err := config.DefaultPath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error getting config path: %v\n", err)
+		os.Exit(1)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error loading config: %v\n", err)
+		os.Exit(1)
+	}
+	if cfg.APIKey == "" {
+		fmt.Fprintf(os.Stderr, "no api_key set in %s\n", cfgPath)
+		os.Exit(1)
+	}
+
+	ids, err := models.FetchIDs("https://openrouter.ai/api/v1/models", cfg.APIKey)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error fetching models: %v\n", err)
+		os.Exit(1)
+	}
+
+	list := strings.Join(ids, "\n")
+
+	fzf, err := exec.LookPath("fzf")
+	if err != nil {
+		fmt.Println(list)
+		return
+	}
+
+	cmd := exec.Command(fzf)
+	cmd.Stdin = strings.NewReader(list)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Run()
 }
 
 func runClaude(args []string) {
