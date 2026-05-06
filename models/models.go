@@ -4,17 +4,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 )
 
-type response struct {
-	Data []struct {
-		ID string `json:"id"`
-	} `json:"data"`
+type Pricing struct {
+	Prompt     string `json:"prompt"`
+	Completion string `json:"completion"`
 }
 
-// FetchIDs returns model IDs from the OpenRouter models endpoint.
+type Model struct {
+	ID      string  `json:"id"`
+	Pricing Pricing `json:"pricing"`
+}
+
+type response struct {
+	Data []Model `json:"data"`
+}
+
+// FetchModels returns models with pricing from the OpenRouter models endpoint.
 // baseURL should be "https://openrouter.ai/api/v1/models" in production.
-func FetchIDs(baseURL, apiKey string) ([]string, error) {
+func FetchModels(baseURL, apiKey string) ([]Model, error) {
 	req, err := http.NewRequest(http.MethodGet, baseURL, nil)
 	if err != nil {
 		return nil, err
@@ -36,9 +45,40 @@ func FetchIDs(baseURL, apiKey string) ([]string, error) {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
-	ids := make([]string, len(result.Data))
-	for i, m := range result.Data {
+	return result.Data, nil
+}
+
+// FetchIDs returns model IDs from the OpenRouter models endpoint.
+func FetchIDs(baseURL, apiKey string) ([]string, error) {
+	ms, err := FetchModels(baseURL, apiKey)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(ms))
+	for i, m := range ms {
 		ids[i] = m.ID
 	}
 	return ids, nil
+}
+
+// FormatLine formats a model as "id   $X.XX/$Y.YY per M tokens".
+func FormatLine(m Model) string {
+	in := formatPrice(m.Pricing.Prompt)
+	out := formatPrice(m.Pricing.Completion)
+	if in == "free" && out == "free" {
+		return fmt.Sprintf("%-55s free", m.ID)
+	}
+	return fmt.Sprintf("%-55s %s in / %s out per M", m.ID, in, out)
+}
+
+func formatPrice(raw string) string {
+	if raw == "" || raw == "0" {
+		return "free"
+	}
+	f, err := strconv.ParseFloat(raw, 64)
+	if err != nil || f == 0 {
+		return "free"
+	}
+	perM := f * 1_000_000
+	return fmt.Sprintf("$%.4g", perM)
 }
