@@ -29,7 +29,7 @@ func BuildEnv(cfg *config.Config, logDir string) []string {
 		}
 	}
 	filtered = append(filtered,
-		"ANTHROPIC_BASE_URL=https://openrouter.ai/api",
+		fmt.Sprintf("ANTHROPIC_BASE_URL=http://127.0.0.1:%d", cfg.Port),
 		fmt.Sprintf("ANTHROPIC_AUTH_TOKEN=%s", cfg.APIKey),
 		"ANTHROPIC_API_KEY=",
 		fmt.Sprintf("ANTHROPIC_DEFAULT_OPUS_MODEL=%s", cfg.Models.Opus),

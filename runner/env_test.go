@@ -12,11 +12,12 @@ import (
 func TestBuildEnv(t *testing.T) {
 	cfg := &config.Config{
 		APIKey:       "sk-test",
+		Port:         3458,
 		DefaultModel: "anthropic/claude-sonnet-4.6",
 		Models: config.Models{
-			Opus:    "anthropic/claude-opus-4.7",
-			Sonnet:  "anthropic/claude-sonnet-4.6",
-			Haiku:   "anthropic/claude-haiku-4.5",
+			Opus:     "anthropic/claude-opus-4.7",
+			Sonnet:   "anthropic/claude-sonnet-4.6",
+			Haiku:    "anthropic/claude-haiku-4.5",
 			Subagent: "anthropic/claude-opus-4.7",
 		},
 	}
@@ -34,7 +35,7 @@ func TestBuildEnv(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"ANTHROPIC_BASE_URL":             "https://openrouter.ai/api",
+		"ANTHROPIC_BASE_URL":             "http://127.0.0.1:3458",
 		"ANTHROPIC_AUTH_TOKEN":           "sk-test",
 		"ANTHROPIC_API_KEY":              "",
 		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "anthropic/claude-opus-4.7",
@@ -56,6 +57,7 @@ func TestBuildEnvOverridesExisting(t *testing.T) {
 
 	cfg := &config.Config{
 		APIKey: "new-key",
+		Port:   3458,
 		Models: config.Models{},
 	}
 
@@ -75,7 +77,7 @@ func TestBuildEnvOverridesExisting(t *testing.T) {
 }
 
 func TestBuildEnvLogDir(t *testing.T) {
-	cfg := &config.Config{APIKey: "sk-test", Models: config.Models{}}
+	cfg := &config.Config{APIKey: "sk-test", Port: 3458, Models: config.Models{}}
 
 	t.Run("log dir set", func(t *testing.T) {
 		env := runner.BuildEnv(cfg, "/tmp/logs")

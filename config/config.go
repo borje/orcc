@@ -17,12 +17,14 @@ type Models struct {
 
 type Config struct {
 	APIKey       string `yaml:"api_key"`
+	Port         int    `yaml:"port"`
 	DefaultModel string `yaml:"default_model"`
 	Models       Models `yaml:"models"`
 }
 
 var defaults = Config{
 	APIKey:       "",
+	Port:         3458,
 	DefaultModel: "anthropic/claude-sonnet-4.6",
 	Models: Models{
 		Opus:    "anthropic/claude-opus-4.7",
@@ -67,6 +69,7 @@ func createDefault(path string) error {
 	content := `# orcc configuration
 # Get your API key at https://openrouter.ai/keys
 api_key: ""
+port: 3458
 
 default_model: "anthropic/claude-sonnet-4.6"
 
