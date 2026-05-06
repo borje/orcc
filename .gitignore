@@ -1,0 +1,11 @@
+# Binary
+orcc
+
+# Go
+*.test
+*.out
+/vendor/
+
+# Secrets
+*.env
+.env*
