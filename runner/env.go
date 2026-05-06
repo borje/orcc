@@ -16,9 +16,10 @@ var overrideKeys = map[string]bool{
 	"ANTHROPIC_DEFAULT_SONNET_MODEL": true,
 	"ANTHROPIC_DEFAULT_HAIKU_MODEL":  true,
 	"CLAUDE_CODE_SUBAGENT_MODEL":     true,
+	"OTEL_LOG_RAW_API_BODIES":        true,
 }
 
-func BuildEnv(cfg *config.Config) []string {
+func BuildEnv(cfg *config.Config, logDir string) []string {
 	base := os.Environ()
 	filtered := make([]string, 0, len(base)+len(overrideKeys))
 	for _, e := range base {
@@ -36,6 +37,9 @@ func BuildEnv(cfg *config.Config) []string {
 		fmt.Sprintf("ANTHROPIC_DEFAULT_HAIKU_MODEL=%s", cfg.Models.Haiku),
 		fmt.Sprintf("CLAUDE_CODE_SUBAGENT_MODEL=%s", cfg.Models.Subagent),
 	)
+	if logDir != "" {
+		filtered = append(filtered, fmt.Sprintf("OTEL_LOG_RAW_API_BODIES=file:%s", logDir))
+	}
 	return filtered
 }
 

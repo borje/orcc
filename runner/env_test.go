@@ -21,7 +21,7 @@ func TestBuildEnv(t *testing.T) {
 		},
 	}
 
-	env := runner.BuildEnv(cfg)
+	env := runner.BuildEnv(cfg, "")
 
 	got := make(map[string]string)
 	for _, e := range env {
@@ -59,7 +59,7 @@ func TestBuildEnvOverridesExisting(t *testing.T) {
 		Models: config.Models{},
 	}
 
-	env := runner.BuildEnv(cfg)
+	env := runner.BuildEnv(cfg, "")
 
 	counts := make(map[string]int)
 	for _, e := range env {
@@ -72,6 +72,43 @@ func TestBuildEnvOverridesExisting(t *testing.T) {
 			t.Errorf("duplicate env var %s (count=%d)", k, n)
 		}
 	}
+}
+
+func TestBuildEnvLogDir(t *testing.T) {
+	cfg := &config.Config{APIKey: "sk-test", Models: config.Models{}}
+
+	t.Run("log dir set", func(t *testing.T) {
+		env := runner.BuildEnv(cfg, "/tmp/logs")
+		got := make(map[string]string)
+		for _, e := range env {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) == 2 {
+				got[parts[0]] = parts[1]
+			}
+		}
+		if got["OTEL_LOG_RAW_API_BODIES"] != "file:/tmp/logs" {
+			t.Errorf("OTEL_LOG_RAW_API_BODIES = %q, want %q", got["OTEL_LOG_RAW_API_BODIES"], "file:/tmp/logs")
+		}
+	})
+
+	t.Run("log dir empty", func(t *testing.T) {
+		env := runner.BuildEnv(cfg, "")
+		for _, e := range env {
+			if strings.HasPrefix(e, "OTEL_LOG_RAW_API_BODIES=") {
+				t.Errorf("unexpected OTEL_LOG_RAW_API_BODIES in env: %s", e)
+			}
+		}
+	})
+
+	t.Run("strips pre-existing OTEL var", func(t *testing.T) {
+		t.Setenv("OTEL_LOG_RAW_API_BODIES", "file:/old/path")
+		env := runner.BuildEnv(cfg, "")
+		for _, e := range env {
+			if strings.HasPrefix(e, "OTEL_LOG_RAW_API_BODIES=") {
+				t.Errorf("pre-existing OTEL_LOG_RAW_API_BODIES not stripped: %s", e)
+			}
+		}
+	})
 }
 
 func TestBuildArgs(t *testing.T) {

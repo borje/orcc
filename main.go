@@ -38,9 +38,10 @@ func printHelp() {
 	fmt.Printf(`orcc %s — OpenRouter Claude Code launcher
 
 Usage:
-  orcc claude [args...]   Start Claude Code via OpenRouter (all args passed to claude)
-  orcc models             List available OpenRouter models (pipes to fzf if installed)
-  orcc help               Show this help
+  orcc claude [args...]                    Start Claude Code via OpenRouter (all args passed to claude)
+  orcc claude --orcc-log-dir <dir> [args]  Also log raw API requests/responses to <dir>
+  orcc models                              List available OpenRouter models (pipes to fzf if installed)
+  orcc help                                Show this help
 
 Config: ~/.config/orcc/config.yaml
 `, version)
@@ -100,6 +101,14 @@ func runClaude(args []string) {
 		os.Exit(1)
 	}
 
+	logDir, args := extractFlag(args, "--orcc-log-dir")
+	if logDir != "" {
+		if err := os.MkdirAll(logDir, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "error creating log dir %s: %v\n", logDir, err)
+			os.Exit(1)
+		}
+	}
+
 	claudeBin, err := exec.LookPath("claude")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "claude not found in PATH: %v\n", err)
@@ -107,10 +116,19 @@ func runClaude(args []string) {
 	}
 
 	argv := runner.BuildArgs(cfg.DefaultModel, args)
-	env := runner.BuildEnv(cfg)
+	env := runner.BuildEnv(cfg, logDir)
 
 	if err := syscall.Exec(claudeBin, argv, env); err != nil {
 		fmt.Fprintf(os.Stderr, "exec claude: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func extractFlag(args []string, flag string) (string, []string) {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1], append(args[:i:i], args[i+2:]...)
+		}
+	}
+	return "", args
 }
