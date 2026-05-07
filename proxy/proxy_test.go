@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -9,49 +10,42 @@ func TestInjectWebSearch(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		wantURL  string
 		wantTool string
 		wantTC   string
 	}{
 		{
 			name:     "no tools",
 			input:    `{"model":"test"}`,
-			wantURL:  "",
 			wantTool: "",
 			wantTC:   "",
 		},
 		{
 			name:     "no web_search",
 			input:    `{"model":"test","tools":[{"name":"foo","input_schema":{}}]}`,
-			wantURL:  "",
 			wantTool: "",
 			wantTC:   "",
 		},
 		{
 			name:     "web_search found",
 			input:    `{"model":"test","tools":[{"name":"web_search","input_schema":{}}]}`,
-			wantURL:  "openrouter:web_search",
 			wantTool: "openrouter:web_search",
 			wantTC:   "",
 		},
 		{
 			name:     "web_search with other tools",
 			input:    `{"model":"test","tools":[{"name":"web_search","input_schema":{}},{"name":"bash","input_schema":{}}]}`,
-			wantURL:  "openrouter:web_search",
 			wantTool: "openrouter:web_search",
 			wantTC:   "",
 		},
 		{
 			name:     "tool_choice set to web_search",
 			input:    `{"model":"test","tools":[{"name":"web_search","input_schema":{}}],"tool_choice":{"type":"tool","name":"web_search"}}`,
-			wantURL:  "openrouter:web_search",
 			wantTool: "openrouter:web_search",
-			wantTC:   "null",
+			wantTC:   "deleted",
 		},
 		{
 			name:     "tool_choice set to other",
 			input:    `{"model":"test","tools":[{"name":"web_search","input_schema":{}}],"tool_choice":{"type":"tool","name":"bash"}}`,
-			wantURL:  "openrouter:web_search",
 			wantTool: "openrouter:web_search",
 			wantTC:   "",
 		},
@@ -107,16 +101,9 @@ func TestInjectWebSearch(t *testing.T) {
 				}
 			}
 
-			if tc.wantTC == "null" {
-				tcRaw, ok := got["tool_choice"]
-				if !ok {
-					t.Errorf("tool_choice missing")
-				} else {
-					var tcVal interface{}
-					json.Unmarshal(tcRaw, &tcVal)
-					if tcVal != nil {
-						t.Errorf("tool_choice = %v, want null", tcVal)
-					}
+			if tc.wantTC == "deleted" {
+				if _, ok := got["tool_choice"]; ok {
+					t.Errorf("tool_choice present, want deleted")
 				}
 			}
 		})
@@ -134,5 +121,55 @@ func TestInjectWebSearchInvalidJSON(t *testing.T) {
 	}
 	if string(out) != "{invalid" {
 		t.Errorf("expected original body returned, got: %s", string(out))
+	}
+}
+
+func TestFilterServerToolUseSSE(t *testing.T) {
+	// Synthetic SSE stream with openrouter:web_search at index 0, text at index 1.
+	input := `event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"id123","name":"openrouter:web_search","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"test\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"hello"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+`
+	var buf strings.Builder
+	filterServerToolUseSSE(strings.NewReader(input), &buf, nil)
+	got := buf.String()
+
+	// server_tool_use block renamed, not dropped.
+	if !strings.Contains(got, `"name":"web_search"`) {
+		t.Error("expected server_tool_use renamed to web_search")
+	}
+	if strings.Contains(got, "openrouter:web_search") {
+		t.Error("expected openrouter:web_search removed from stream")
+	}
+
+	// web_search_tool_result injected after server_tool_use stop.
+	if !strings.Contains(got, "web_search_tool_result") {
+		t.Error("expected web_search_tool_result block injected")
+	}
+	if !strings.Contains(got, `"tool_use_id":"id123"`) {
+		t.Error("expected tool_use_id to match server_tool_use id")
+	}
+
+	// Text block re-indexed from 1 → 2.
+	if !strings.Contains(got, `"index":2`) {
+		t.Error("expected text block re-indexed to 2")
+	}
+	if strings.Contains(got, `"index":1,"content_block":{"type":"text"`) {
+		t.Error("expected text block index shifted away from 1")
 	}
 }
