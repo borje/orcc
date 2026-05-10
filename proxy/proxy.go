@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"orcc/config"
 )
@@ -23,12 +24,28 @@ func New(cfg *config.Config) *Proxy {
 	return &Proxy{
 		cfg:    cfg,
 		target: "https://openrouter.ai/api/v1",
-		client: &http.Client{},
+		client: &http.Client{
+			Timeout: 5 * time.Minute,
+		},
 	}
 }
 
-func (p *Proxy) Start(addr string) error {
-	return http.ListenAndServe(addr, p)
+type Server struct {
+	*http.Server
+	proxy *Proxy
+}
+
+func (p *Proxy) Start(addr string) (*Server, error) {
+	srv := &Server{
+		Server: &http.Server{Addr: addr, Handler: p},
+		proxy:  p,
+	}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("proxy server error: %v", err)
+		}
+	}()
+	return srv, nil
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {

@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -156,7 +157,7 @@ func startDaemon() {
 		os.Exit(1)
 	}
 
-	logF, err := os.OpenFile(logPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logF, err := openLogFile()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "open log: %v\n", err)
 		os.Exit(1)
@@ -181,6 +182,8 @@ func startDaemon() {
 	fmt.Println("orcc proxy started")
 }
 
+var proxyServer *proxy.Server
+
 func serveProxy() {
 	cfg, err := loadConfig()
 	if err != nil {
@@ -190,9 +193,16 @@ func serveProxy() {
 	p := proxy.New(cfg)
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
 	log.Printf("starting proxy on %s", addr)
-	if err := p.Start(addr); err != nil {
+	srv, err := p.Start(addr)
+	if err != nil {
 		log.Fatalf("proxy start: %v", err)
 	}
+	proxyServer = srv
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, unix.SIGTERM, unix.SIGINT)
+	<-sigCh
+	log.Println("shutting down proxy")
+	proxyServer.Close()
 }
 
 func stopDaemon() {
@@ -323,6 +333,15 @@ func loadConfig() (*config.Config, error) {
 		cfg.Port = 3458
 	}
 	return cfg, nil
+}
+
+func openLogFile() (*os.File, error) {
+	const maxSize int64 = 10 * 1024 * 1024 // 10MB
+	path := logPath()
+	if info, err := os.Stat(path); err == nil && info.Size() > maxSize {
+		os.Remove(path)
+	}
+	return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 }
 
 func logPath() string {
