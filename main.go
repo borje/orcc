@@ -63,7 +63,7 @@ Usage:
   orcc status                             Show proxy daemon status
   orcc claude [args...]                   Start Claude Code via OpenRouter (all args passed to claude)
   orcc claude --orcc-log-dir <dir> [args] Also log raw API requests/responses to <dir>
-  orcc models                              List available OpenRouter models (pipes to fzf if installed)
+  orcc models [--sort price|name|none]     List available OpenRouter models (pipes to fzf if installed)
   orcc version                             Show version
   orcc help                                Show this help
 
@@ -71,7 +71,7 @@ Config: ~/.config/orcc/config.yaml
 `, version)
 }
 
-func listModels(_ []string) {
+func listModels(args []string) {
 	cfg, err := loadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -81,6 +81,23 @@ func listModels(_ []string) {
 	ms, err := models.FetchModels("https://openrouter.ai/api/v1/models", cfg.APIKey)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error fetching models: %v\n", err)
+		os.Exit(1)
+	}
+
+	sortMode := "price"
+	for i, a := range args {
+		if a == "--sort" && i+1 < len(args) {
+			sortMode = args[i+1]
+		}
+	}
+	switch sortMode {
+	case "price":
+		models.SortByPrice(ms)
+	case "name":
+		models.SortByName(ms)
+	case "none":
+	default:
+		fmt.Fprintf(os.Stderr, "unknown sort mode: %s (use price, name, or none)\n", sortMode)
 		os.Exit(1)
 	}
 
@@ -96,7 +113,7 @@ func listModels(_ []string) {
 		return
 	}
 
-	cmd := exec.Command(fzf)
+	cmd := exec.Command(fzf, "+s")
 	cmd.Stdin = strings.NewReader(list)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

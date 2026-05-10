@@ -114,3 +114,57 @@ func TestFetchModelsInvalidJSON(t *testing.T) {
 		t.Error("expected error on invalid JSON")
 	}
 }
+
+func TestParsePrice(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want float64
+		ok   bool
+	}{
+		{"0", 0, true},
+		{"", 0, true},
+		{"0.000003", 0.000003, true},
+		{"0.000015", 0.000015, true},
+		{"invalid", 0, false},
+	}
+	for _, c := range cases {
+		got, ok := models.ParsePrice(c.raw)
+		if got != c.want || ok != c.ok {
+			t.Errorf("ParsePrice(%q) = (%v, %v), want (%v, %v)", c.raw, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+func TestSortByPrice(t *testing.T) {
+	ms := []models.Model{
+		{ID: "a", Pricing: models.Pricing{Prompt: "0.000003", Completion: "0.000015"}},
+		{ID: "b", Pricing: models.Pricing{Prompt: "0", Completion: "0"}},
+		{ID: "c", Pricing: models.Pricing{Prompt: "0.0000003", Completion: "0.0000012"}},
+		{ID: "d", Pricing: models.Pricing{Prompt: "0.000003", Completion: "0.000001"}},
+	}
+	models.SortByPrice(ms)
+	if ms[0].ID != "b" {
+		t.Errorf("first = %q, want free model 'b'", ms[0].ID)
+	}
+	if ms[1].ID != "c" {
+		t.Errorf("second = %q, want 'c'", ms[1].ID)
+	}
+	if ms[2].ID != "d" {
+		t.Errorf("third = %q, want 'd' (prompt tie, lower completion)", ms[2].ID)
+	}
+	if ms[3].ID != "a" {
+		t.Errorf("fourth = %q, want 'a'", ms[3].ID)
+	}
+}
+
+func TestSortByName(t *testing.T) {
+	ms := []models.Model{
+		{ID: "z-model"},
+		{ID: "a-model"},
+		{ID: "m-model"},
+	}
+	models.SortByName(ms)
+	if ms[0].ID != "a-model" || ms[1].ID != "m-model" || ms[2].ID != "z-model" {
+		t.Errorf("SortByName order: %q", []string{ms[0].ID, ms[1].ID, ms[2].ID})
+	}
+}

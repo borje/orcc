@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 )
 
@@ -81,4 +82,34 @@ func formatPrice(raw string) string {
 	}
 	perM := f * 1_000_000
 	return fmt.Sprintf("$%.4g", perM)
+}
+
+func ParsePrice(raw string) (float64, bool) {
+	if raw == "" || raw == "0" {
+		return 0, true
+	}
+	f, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, false
+	}
+	return f, true
+}
+
+func SortByPrice(ms []Model) {
+	sort.Slice(ms, func(i, j int) bool {
+		pi, _ := ParsePrice(ms[i].Pricing.Prompt)
+		pj, _ := ParsePrice(ms[j].Pricing.Prompt)
+		if pi != pj {
+			return pi < pj
+		}
+		ci, _ := ParsePrice(ms[i].Pricing.Completion)
+		cj, _ := ParsePrice(ms[j].Pricing.Completion)
+		return ci < cj
+	})
+}
+
+func SortByName(ms []Model) {
+	sort.Slice(ms, func(i, j int) bool {
+		return ms[i].ID < ms[j].ID
+	})
 }
