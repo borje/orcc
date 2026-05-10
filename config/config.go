@@ -71,13 +71,13 @@ func createDefault(path string) error {
 api_key: ""
 port: 3458
 
-default_model: "anthropic/claude-sonnet-4.6"
+default_model: "openrouter/free"
 
 models:
-  opus: "anthropic/claude-opus-4.7"
-  sonnet: "anthropic/claude-sonnet-4.6"
-  haiku: "anthropic/claude-haiku-4.5"
-  subagent: "anthropic/claude-opus-4.7"
+  opus: "openrouter/free"
+  sonnet: "openrouter/free"
+  haiku: "openrouter/free"
+  subagent: "openrouter/free"
 `
 	return os.WriteFile(path, []byte(content), 0600)
 }
