@@ -25,12 +25,12 @@ type Config struct {
 var defaults = Config{
 	APIKey:       "",
 	Port:         3458,
-	DefaultModel: "anthropic/claude-sonnet-4.6",
+	DefaultModel: "openrouter/free",
 	Models: Models{
-		Opus:    "anthropic/claude-opus-4.7",
-		Sonnet:  "anthropic/claude-sonnet-4.6",
-		Haiku:   "anthropic/claude-haiku-4.5",
-		Subagent: "anthropic/claude-opus-4.7",
+		Opus:    "openrouter/free",
+		Sonnet:  "openrouter/free",
+		Haiku:   "openrouter/free",
+		Subagent: "openrouter/free",
 	},
 }
 
