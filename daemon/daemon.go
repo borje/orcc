@@ -5,7 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 func PidPath() (string, error) {
@@ -40,6 +41,6 @@ func RemovePid(path string) {
 }
 
 func IsRunning(pid int) bool {
-	err := syscall.Kill(pid, 0)
+	err := unix.Kill(pid, 0)
 	return err == nil
 }

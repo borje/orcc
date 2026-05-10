@@ -8,8 +8,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
+
+	"golang.org/x/term"
+	"golang.org/x/sys/unix"
 
 	"orcc/config"
 	"orcc/daemon"
@@ -113,11 +115,21 @@ func listModels(args []string) {
 		return
 	}
 
+	// Only use fzf if stdout is a TTY (not piped to another process)
+	if !isTerminal(os.Stdout.Fd()) {
+		fmt.Println(list)
+		return
+	}
+
 	cmd := exec.Command(fzf, "+s")
 	cmd.Stdin = strings.NewReader(list)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Run()
+}
+
+func isTerminal(fd uintptr) bool {
+	return term.IsTerminal(int(fd))
 }
 
 func startDaemon() {
@@ -152,7 +164,7 @@ func startDaemon() {
 
 	proc, err := os.StartProcess(bin, []string{bin, "serve"}, &os.ProcAttr{
 		Files: []*os.File{os.Stdin, logF, logF},
-		Sys:   &syscall.SysProcAttr{Setsid: true},
+		Sys:   &unix.SysProcAttr{Setsid: true},
 	})
 	logF.Close()
 	if err != nil {
@@ -202,7 +214,7 @@ func stopDaemon() {
 		return
 	}
 
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	if err := unix.Kill(pid, unix.SIGTERM); err != nil {
 		fmt.Fprintf(os.Stderr, "kill %d: %v\n", pid, err)
 		os.Exit(1)
 	}
@@ -261,7 +273,7 @@ func runClaude(args []string) {
 	argv := runner.BuildArgs(cfg.DefaultModel, args)
 	env := runner.BuildEnv(cfg, logDir)
 
-	if err := syscall.Exec(claudeBin, argv, env); err != nil {
+	if err := unix.Exec(claudeBin, argv, env); err != nil {
 		fmt.Fprintf(os.Stderr, "exec claude: %v\n", err)
 		os.Exit(1)
 	}
