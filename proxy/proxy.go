@@ -95,21 +95,13 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
 		log.Printf("handleMessages: upstream error body: %s", respBody)
-		for k, v := range resp.Header {
-			for _, val := range v {
-				w.Header().Add(k, val)
-			}
-		}
+		copyHeaders(w, resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		w.Write(respBody)
 		return
 	}
 
-	for k, v := range resp.Header {
-		for _, val := range v {
-			w.Header().Add(k, val)
-		}
-	}
+	copyHeaders(w, resp.Header)
 	w.WriteHeader(resp.StatusCode)
 
 	f, _ := w.(http.Flusher)
@@ -213,13 +205,7 @@ func filterServerToolUseSSE(body io.Reader, w io.Writer, f http.Flusher) {
 				if shift > 0 && idx > renamedIdx {
 					evt["index"] = mustMarshal(idx + shift)
 				}
-				newData, _ := json.Marshal(evt)
-				for i, l := range lines {
-					if strings.HasPrefix(l, "data: ") {
-						lines[i] = "data: " + string(newData)
-						break
-					}
-				}
+				rewriteDataLine(lines, evt)
 			}
 
 		case "content_block_stop":
@@ -231,25 +217,13 @@ func filterServerToolUseSSE(body io.Reader, w io.Writer, f http.Flusher) {
 			}
 			if shift > 0 && idx > renamedIdx {
 				evt["index"] = mustMarshal(idx + shift)
-				newData, _ := json.Marshal(evt)
-				for i, l := range lines {
-					if strings.HasPrefix(l, "data: ") {
-						lines[i] = "data: " + string(newData)
-						break
-					}
-				}
+				rewriteDataLine(lines, evt)
 			}
 
 		case "content_block_delta":
 			if shift > 0 && idx >= 0 && idx > renamedIdx {
 				evt["index"] = mustMarshal(idx + shift)
-				newData, _ := json.Marshal(evt)
-				for i, l := range lines {
-					if strings.HasPrefix(l, "data: ") {
-						lines[i] = "data: " + string(newData)
-						break
-					}
-				}
+				rewriteDataLine(lines, evt)
 			}
 		}
 
@@ -267,6 +241,9 @@ func filterServerToolUseSSE(body io.Reader, w io.Writer, f http.Flusher) {
 	if len(lines) > 0 {
 		emit()
 	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("filterSSE: scanner error: %v", err)
+	}
 }
 
 func writeLines(w io.Writer, f http.Flusher, lines []string) {
@@ -276,6 +253,16 @@ func writeLines(w io.Writer, f http.Flusher, lines []string) {
 	fmt.Fprint(w, "\n")
 	if f != nil {
 		f.Flush()
+	}
+}
+
+func rewriteDataLine(lines []string, evt map[string]json.RawMessage) {
+	newData, _ := json.Marshal(evt)
+	for i, l := range lines {
+		if strings.HasPrefix(l, "data: ") {
+			lines[i] = "data: " + string(newData)
+			break
+		}
 	}
 }
 
@@ -347,6 +334,14 @@ func setOutboundHeaders(req *http.Request, src http.Header, apiKey string) {
 	req.Header.Set("x-api-key", apiKey)
 }
 
+func copyHeaders(w http.ResponseWriter, src http.Header) {
+	for k, v := range src {
+		for _, val := range v {
+			w.Header().Add(k, val)
+		}
+	}
+}
+
 type flushWriter struct {
 	w http.ResponseWriter
 	f http.Flusher
@@ -359,11 +354,7 @@ func (fw *flushWriter) Write(p []byte) (int, error) {
 }
 
 func copyResponse(w http.ResponseWriter, resp *http.Response) {
-	for k, v := range resp.Header {
-		for _, val := range v {
-			w.Header().Add(k, val)
-		}
-	}
+	copyHeaders(w, resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	if f, ok := w.(http.Flusher); ok {
 		io.Copy(&flushWriter{w, f}, resp.Body)
@@ -393,21 +384,6 @@ func injectWebSearch(body []byte) ([]byte, bool, error) {
 		return nil, false, err
 	}
 
-	hasWebSearch := false
-	for _, tool := range tools {
-		var t map[string]json.RawMessage
-		if json.Unmarshal(tool, &t) == nil {
-			if isWebSearchTool(t) {
-				hasWebSearch = true
-				break
-			}
-		}
-	}
-
-	if !hasWebSearch {
-		return body, false, nil
-	}
-
 	var newTools []json.RawMessage
 	for _, tool := range tools {
 		var t map[string]json.RawMessage
@@ -415,6 +391,9 @@ func injectWebSearch(body []byte) ([]byte, bool, error) {
 			continue
 		}
 		newTools = append(newTools, tool)
+	}
+	if len(newTools) == len(tools) {
+		return body, false, nil
 	}
 	newTools = append(newTools, json.RawMessage(`{"type":"openrouter:web_search"}`))
 
