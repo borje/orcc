@@ -64,6 +64,7 @@ Usage:
   orcc stop                               Stop the proxy daemon
   orcc restart                            Restart the proxy daemon
   orcc status                             Show proxy daemon status
+  orcc serve [--debug]                    Run the proxy in the foreground
   orcc claude [args...]                   Start Claude Code via OpenRouter (all args passed to claude)
   orcc claude --orcc-log-dir <dir> [args] Also log raw API requests/responses to <dir>
   orcc models [--sort price|name|none]     List available OpenRouter models (pipes to fzf if installed)
@@ -188,6 +189,12 @@ func serveProxy() {
 	cfg, err := loadConfig()
 	if err != nil {
 		log.Fatalf("%v", err)
+	}
+
+	for _, a := range os.Args[2:] {
+		if a == "--debug" {
+			cfg.Debug = true
+		}
 	}
 
 	p := proxy.New(cfg)

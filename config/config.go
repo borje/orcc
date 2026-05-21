@@ -19,6 +19,7 @@ type Config struct {
 	APIKey       string `yaml:"api_key"`
 	Port         int    `yaml:"port"`
 	DefaultModel string `yaml:"default_model"`
+	Debug        bool   `yaml:"debug"`
 	Models       Models `yaml:"models"`
 }
 
@@ -70,6 +71,7 @@ func createDefault(path string) error {
 # Get your API key at https://openrouter.ai/keys
 api_key: ""
 port: 3458
+debug: false
 
 default_model: "openrouter/free"
 

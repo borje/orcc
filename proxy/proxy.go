@@ -18,11 +18,13 @@ type Proxy struct {
 	cfg    *config.Config
 	target string
 	client *http.Client
+	debug  bool
 }
 
 func New(cfg *config.Config) *Proxy {
 	return &Proxy{
 		cfg:    cfg,
+		debug:  cfg.Debug,
 		target: "https://openrouter.ai/api/v1",
 		client: &http.Client{
 			Timeout: 5 * time.Minute,
@@ -78,6 +80,16 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" {
 		msgURL += "?" + r.URL.RawQuery
 	}
+
+	if p.debug {
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, modified, "", "  "); err == nil {
+			log.Printf("DEBUG request %s:\n%s", msgURL, pretty.String())
+		} else {
+			log.Printf("DEBUG request %s: %s", msgURL, string(modified))
+		}
+	}
+
 	req, err := http.NewRequest(http.MethodPost, msgURL, bytes.NewReader(modified))
 	if err != nil {
 		http.Error(w, "create request", http.StatusInternalServerError)
