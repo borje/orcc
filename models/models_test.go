@@ -46,21 +46,6 @@ func TestFetchModels(t *testing.T) {
 	}
 }
 
-func TestFetchIDs(t *testing.T) {
-	srv := mockServer(t)
-	defer srv.Close()
-
-	ids, err := models.FetchIDs(srv.URL, "test-key")
-	if err != nil {
-		t.Fatalf("FetchIDs() error: %v", err)
-	}
-	if len(ids) != 3 {
-		t.Fatalf("got %d ids, want 3", len(ids))
-	}
-	if ids[1] != "minimax/minimax-m2.7" {
-		t.Errorf("ids[1] = %q", ids[1])
-	}
-}
 
 func TestFormatLine(t *testing.T) {
 	cases := []struct {

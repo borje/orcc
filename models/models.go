@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"time"
 )
 
 type Pricing struct {
@@ -22,6 +23,8 @@ type response struct {
 	Data []Model `json:"data"`
 }
 
+var fetchClient = &http.Client{Timeout: 30 * time.Second}
+
 // FetchModels returns models with pricing from the OpenRouter models endpoint.
 // baseURL should be "https://openrouter.ai/api/v1/models" in production.
 func FetchModels(baseURL, apiKey string) ([]Model, error) {
@@ -31,7 +34,7 @@ func FetchModels(baseURL, apiKey string) ([]Model, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := fetchClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -47,19 +50,6 @@ func FetchModels(baseURL, apiKey string) ([]Model, error) {
 	}
 
 	return result.Data, nil
-}
-
-// FetchIDs returns model IDs from the OpenRouter models endpoint.
-func FetchIDs(baseURL, apiKey string) ([]string, error) {
-	ms, err := FetchModels(baseURL, apiKey)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]string, len(ms))
-	for i, m := range ms {
-		ids[i] = m.ID
-	}
-	return ids, nil
 }
 
 // FormatLine formats a model as "id   $X.XX/$Y.YY per M tokens".

@@ -138,6 +138,12 @@ func TestBuildArgs(t *testing.T) {
 			extra:        []string{"--model", "anthropic/claude-opus-4.7"},
 			want:         []string{"claude", "--model", "anthropic/claude-opus-4.7"},
 		},
+		{
+			name:         "user supplies --model=value overrides default",
+			defaultModel: "anthropic/claude-sonnet-4.6",
+			extra:        []string{"--model=anthropic/claude-opus-4.7"},
+			want:         []string{"claude", "--model=anthropic/claude-opus-4.7"},
+		},
 	}
 
 	for _, tc := range tests {

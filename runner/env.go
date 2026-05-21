@@ -47,7 +47,7 @@ func BuildEnv(cfg *config.Config, logDir string) []string {
 // default is omitted so the user's value takes precedence.
 func BuildArgs(defaultModel string, extra []string) []string {
 	for _, a := range extra {
-		if a == "--model" {
+		if a == "--model" || strings.HasPrefix(a, "--model=") {
 			return append([]string{"claude"}, extra...)
 		}
 	}

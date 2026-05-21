@@ -1,16 +1,17 @@
 package main
 
 import (
+	"reflect"
 	"testing"
 )
 
 func TestExtractFlag(t *testing.T) {
 	tests := []struct {
-		name      string
-		args      []string
-		flag      string
-		wantVal   string
-		wantRest  []string
+		name     string
+		args     []string
+		flag     string
+		wantVal  string
+		wantRest []string
 	}{
 		{"found", []string{"--log-dir", "/tmp", "rest"}, "--log-dir", "/tmp", []string{"rest"}},
 		{"not found", []string{"--model", "sonnet"}, "--log-dir", "", []string{"--model", "sonnet"}},
@@ -24,7 +25,7 @@ func TestExtractFlag(t *testing.T) {
 			if gotVal != tc.wantVal {
 				t.Errorf("value = %q, want %q", gotVal, tc.wantVal)
 			}
-			if len(gotRest) != len(tc.wantRest) {
+			if !reflect.DeepEqual(gotRest, tc.wantRest) {
 				t.Errorf("rest = %v, want %v", gotRest, tc.wantRest)
 			}
 		})

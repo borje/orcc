@@ -183,8 +183,6 @@ func startDaemon() {
 	fmt.Println("orcc proxy started")
 }
 
-var proxyServer *proxy.Server
-
 func serveProxy() {
 	cfg, err := loadConfig()
 	if err != nil {
@@ -204,12 +202,11 @@ func serveProxy() {
 	if err != nil {
 		log.Fatalf("proxy start: %v", err)
 	}
-	proxyServer = srv
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, unix.SIGTERM, unix.SIGINT)
 	<-sigCh
 	log.Println("shutting down proxy")
-	proxyServer.Close()
+	srv.Close()
 }
 
 func stopDaemon() {
@@ -345,6 +342,9 @@ func loadConfig() (*config.Config, error) {
 func openLogFile() (*os.File, error) {
 	const maxSize int64 = 10 * 1024 * 1024 // 10MB
 	path := logPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return nil, err
+	}
 	if info, err := os.Stat(path); err == nil && info.Size() > maxSize {
 		os.Remove(path)
 	}

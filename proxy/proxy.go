@@ -90,7 +90,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	req, err := http.NewRequest(http.MethodPost, msgURL, bytes.NewReader(modified))
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, msgURL, bytes.NewReader(modified))
 	if err != nil {
 		http.Error(w, "create request", http.StatusInternalServerError)
 		return
@@ -126,11 +126,11 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// filterServerToolUseSSE rewrites server_tool_use content blocks whose name is
-// "openrouter:web_search" to name "web_search", then injects a minimal
-// web_search_tool_result block after it (Claude Code increments its search
-// counter when it sees web_search_tool_result, not server_tool_use alone).
-// Subsequent block indices are shifted +1 to accommodate the injected block.
+// filterServerToolUseSSE exists because OpenRouter returns web search blocks as
+// server_tool_use{name:"openrouter:web_search"}, but Claude Code only recognises
+// server_tool_use{name:"web_search"} and increments its search counter only when
+// it also sees a matching web_search_tool_result block. This function renames the
+// tool and injects that result block, shifting subsequent indices by +1.
 func filterServerToolUseSSE(body io.Reader, w io.Writer, f http.Flusher) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 256*1024), 256*1024)
@@ -315,7 +315,7 @@ func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
-	req, err := http.NewRequest(r.Method, target, r.Body)
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, r.Body)
 	if err != nil {
 		http.Error(w, "create request", http.StatusInternalServerError)
 		return
