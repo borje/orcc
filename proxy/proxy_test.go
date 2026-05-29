@@ -2,8 +2,12 @@ package proxy
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"orcc/config"
 )
 
 func TestInjectWebSearch(t *testing.T) {
@@ -172,4 +176,360 @@ data: {"type":"content_block_stop","index":1}
 	if strings.Contains(got, `"index":1,"content_block":{"type":"text"`) {
 		t.Error("expected text block index shifted away from 1")
 	}
+}
+
+// ── Request optimization tests ─────────────────────────────────────────────────
+
+func TestIsQuotaCheck(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			name: "quota check request",
+			body: `{"model":"test","max_tokens":1,"messages":[{"role":"user","content":"quota"}]}`,
+			want: true,
+		},
+		{
+			name: "not quota - max_tokens > 1",
+			body: `{"model":"test","max_tokens":100,"messages":[{"role":"user","content":"quota"}]}`,
+			want: false,
+		},
+		{
+			name: "not quota - no quota text",
+			body: `{"model":"test","max_tokens":1,"messages":[{"role":"user","content":"hello"}]}`,
+			want: false,
+		},
+		{
+			name: "quota case insensitive",
+			body: `{"model":"test","max_tokens":1,"messages":[{"role":"user","content":"QUOTA"}]}`,
+			want: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := parseRequest([]byte(tc.body))
+			if req == nil {
+				t.Fatal("parseRequest failed")
+			}
+			got := isQuotaCheck(req)
+			if got != tc.want {
+				t.Errorf("isQuotaCheck = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsTitleGeneration(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			name: "sentence-case title",
+			body: `{"model":"test","messages":[{"role":"user","content":"hello"}],"system":"Give a sentence-case title for this session"}`,
+			want: true,
+		},
+		{
+			name: "return json with field and coding session",
+			body: `{"model":"test","messages":[{"role":"user","content":"hello"}],"system":"Return JSON with a title field for this coding session"}`,
+			want: true,
+		},
+		{
+			name: "not title - has tools",
+			body: `{"model":"test","messages":[{"role":"user","content":"hello"}],"system":"Give a sentence-case title","tools":[{"name":"bash"}]}`,
+			want: false,
+		},
+		{
+			name: "not title - no system",
+			body: `{"model":"test","messages":[{"role":"user","content":"hello"}]}`,
+			want: false,
+		},
+		{
+			name: "not title - no title keyword",
+			body: `{"model":"test","messages":[{"role":"user","content":"hello"}],"system":"Do something else"}`,
+			want: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := parseRequest([]byte(tc.body))
+			if req == nil {
+				t.Fatal("parseRequest failed")
+			}
+			got := isTitleGeneration(req)
+			if got != tc.want {
+				t.Errorf("isTitleGeneration = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsPrefixDetection(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantMatch bool
+		wantCmd   string
+	}{
+		{
+			name:      "policy_spec with command",
+			body:      `{"model":"test","messages":[{"role":"user","content":"<policy_spec>...</policy_spec>\nSome stuff\nCommand: ls -la"}]}`,
+			wantMatch: true,
+			wantCmd:   "ls -la",
+		},
+		{
+			name:      "no policy_spec",
+			body:      `{"model":"test","messages":[{"role":"user","content":"Command: ls"}]}`,
+			wantMatch: false,
+			wantCmd:   "",
+		},
+		{
+			name:      "no Command: line",
+			body:      `{"model":"test","messages":[{"role":"user","content":"<policy_spec>...</policy_spec>"}]}`,
+			wantMatch: false,
+			wantCmd:   "",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := parseRequest([]byte(tc.body))
+			if req == nil {
+				t.Fatal("parseRequest failed")
+			}
+			gotMatch, gotCmd := isPrefixDetection(req)
+			if gotMatch != tc.wantMatch || gotCmd != tc.wantCmd {
+				t.Errorf("isPrefixDetection = (%v, %q), want (%v, %q)", gotMatch, gotCmd, tc.wantMatch, tc.wantCmd)
+			}
+		})
+	}
+}
+
+func TestIsSuggestionMode(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			name: "suggestion mode active",
+			body: `{"model":"test","messages":[{"role":"user","content":"[SUGGESTION MODE: some suggestion]"}]}`,
+			want: true,
+		},
+		{
+			name: "not suggestion mode",
+			body: `{"model":"test","messages":[{"role":"user","content":"hello"}]}`,
+			want: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := parseRequest([]byte(tc.body))
+			if req == nil {
+				t.Fatal("parseRequest failed")
+			}
+			got := isSuggestionMode(req)
+			if got != tc.want {
+				t.Errorf("isSuggestionMode = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTryOptimizations(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantMatch bool
+		wantBody  string
+	}{
+		{
+			name:      "quota check",
+			body:      `{"model":"test","max_tokens":1,"messages":[{"role":"user","content":"quota"}]}`,
+			wantMatch: true,
+			wantBody:  "Quota check passed.",
+		},
+		{
+			name:      "title generation",
+			body:      `{"model":"test","messages":[{"role":"user","content":"hello"}],"system":"Give a sentence-case title"}`,
+			wantMatch: true,
+			wantBody:  "Conversation",
+		},
+		{
+			name:      "suggestion mode",
+			body:      `{"model":"test","messages":[{"role":"user","content":"[SUGGESTION MODE: suggest]"}]}`,
+			wantMatch: true,
+			wantBody:  "",
+		},
+		{
+			name:      "prefix detection",
+			body:      `{"model":"test","messages":[{"role":"user","content":"<policy_spec>\nCommand: ls"}]}`,
+			wantMatch: true,
+			wantBody:  "ls",
+		},
+		{
+			name:      "normal request - no match",
+			body:      `{"model":"test","max_tokens":100,"messages":[{"role":"user","content":"hello"}]}`,
+			wantMatch: false,
+			wantBody:  "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			matched := tryOptimizations([]byte(tc.body), rec)
+
+			if matched != tc.wantMatch {
+				t.Errorf("tryOptimizations = %v, want %v", matched, tc.wantMatch)
+			}
+
+			if tc.wantMatch {
+				if rec.Code != http.StatusOK {
+					t.Errorf("status = %d, want 200", rec.Code)
+				}
+				ct := rec.Header().Get("Content-Type")
+				if ct != "text/event-stream" {
+					t.Errorf("Content-Type = %q, want text/event-stream", ct)
+				}
+				if tc.wantBody != "" && !strings.Contains(rec.Body.String(), tc.wantBody) {
+					t.Errorf("response body does not contain %q\n%s", tc.wantBody, rec.Body.String())
+				}
+			}
+		})
+	}
+}
+
+func TestTryOptimizationsInvalidJSON(t *testing.T) {
+	rec := httptest.NewRecorder()
+	matched := tryOptimizations([]byte(`{invalid`), rec)
+	if matched {
+		t.Error("expected no match for invalid JSON")
+	}
+}
+
+func TestConfiguredModelIDs(t *testing.T) {
+	cfg := &config.Config{
+		DefaultModel: "openrouter/free",
+		Models: config.Models{
+			Opus:     "anthropic/claude-opus-4",
+			Sonnet:   "anthropic/claude-sonnet-4",
+			Haiku:    "anthropic/claude-haiku-4",
+			Subagent: "anthropic/claude-opus-4",
+		},
+	}
+	p := New(cfg)
+	ids := p.configuredModelIDs()
+
+	expected := []string{"openrouter/free", "anthropic/claude-opus-4", "anthropic/claude-sonnet-4", "anthropic/claude-haiku-4"}
+	if !equalSlice(ids, expected) {
+		t.Errorf("configuredModelIDs = %v, want %v", ids, expected)
+	}
+}
+
+func TestFallbackModels(t *testing.T) {
+	cfg := &config.Config{
+		DefaultModel: "openrouter/free",
+		Models: config.Models{
+			Opus:   "anthropic/claude-opus-4",
+			Sonnet: "anthropic/claude-sonnet-4",
+		},
+	}
+	p := New(cfg)
+	models := p.fallbackModels()
+
+	if len(models) != 3 {
+		t.Errorf("expected 3 fallback models, got %d", len(models))
+	}
+
+	idSet := map[string]bool{}
+	for _, m := range models {
+		if m["type"] != "model" {
+			t.Errorf("entry missing type=model: %v", m)
+		}
+		if m["id"] == "" {
+			t.Error("entry has empty id")
+		}
+		idSet[m["id"]] = true
+	}
+
+	for _, id := range []string{"openrouter/free", "anthropic/claude-opus-4", "anthropic/claude-sonnet-4"} {
+		if !idSet[id] {
+			t.Errorf("fallback models missing %q", id)
+		}
+	}
+}
+
+func TestEnsureModelsFallsBackOnFetchFailure(t *testing.T) {
+	// No API key set → FetchModels will fail → falls back to configured models.
+	cfg := &config.Config{
+		DefaultModel: "openrouter/free",
+		Models: config.Models{
+			Opus:  "anthropic/claude-opus-4",
+			Haiku: "anthropic/claude-haiku-4",
+		},
+	}
+	p := New(cfg)
+	models := p.ensureModels()
+
+	if len(models) == 0 {
+		t.Fatal("expected at least configured models in fallback")
+	}
+
+	idSet := map[string]bool{}
+	for _, m := range models {
+		idSet[m["id"]] = true
+	}
+
+	for _, id := range []string{"openrouter/free", "anthropic/claude-opus-4", "anthropic/claude-haiku-4"} {
+		if !idSet[id] {
+			t.Errorf("fallback missing %q", id)
+		}
+	}
+}
+
+func TestHandleModels(t *testing.T) {
+	cfg := &config.Config{
+		DefaultModel: "openrouter/free",
+		Models:       config.Models{},
+	}
+	p := New(cfg)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+
+	p.handleModels(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	var resp struct {
+		Data []map[string]string `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(resp.Data) == 0 {
+		t.Error("expected at least one model in response")
+	}
+	if resp.Data[0]["id"] == "" {
+		t.Error("model entry missing id")
+	}
+}
+
+func equalSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

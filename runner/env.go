@@ -9,16 +9,17 @@ import (
 )
 
 var overrideKeys = map[string]bool{
-	"ANTHROPIC_BASE_URL":                   true,
-	"ANTHROPIC_AUTH_TOKEN":                 true,
-	"ANTHROPIC_API_KEY":                    true,
-	"ANTHROPIC_DEFAULT_OPUS_MODEL":         true,
-	"ANTHROPIC_DEFAULT_SONNET_MODEL":       true,
-	"ANTHROPIC_DEFAULT_HAIKU_MODEL":        true,
-	"CLAUDE_CODE_SUBAGENT_MODEL":           true,
-	"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": true,
-	"ENABLE_CLAUDEAI_MCP_SERVERS":          true,
-	"OTEL_LOG_RAW_API_BODIES":              true,
+	"ANTHROPIC_BASE_URL":                         true,
+	"ANTHROPIC_AUTH_TOKEN":                       true,
+	"ANTHROPIC_API_KEY":                          true,
+	"ANTHROPIC_DEFAULT_OPUS_MODEL":               true,
+	"ANTHROPIC_DEFAULT_SONNET_MODEL":             true,
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL":              true,
+	"CLAUDE_CODE_SUBAGENT_MODEL":                 true,
+	"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION":       true,
+	"ENABLE_CLAUDEAI_MCP_SERVERS":                true,
+	"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": true,
+	"OTEL_LOG_RAW_API_BODIES":                    true,
 }
 
 func BuildEnv(cfg *config.Config, logDir string) []string {
@@ -34,6 +35,7 @@ func BuildEnv(cfg *config.Config, logDir string) []string {
 		fmt.Sprintf("ANTHROPIC_BASE_URL=http://127.0.0.1:%d", cfg.Port),
 		fmt.Sprintf("ANTHROPIC_AUTH_TOKEN=%s", cfg.APIKey),
 		"ANTHROPIC_API_KEY=",
+		"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1",
 		fmt.Sprintf("ANTHROPIC_DEFAULT_OPUS_MODEL=%s", cfg.Models.Opus),
 		fmt.Sprintf("ANTHROPIC_DEFAULT_SONNET_MODEL=%s", cfg.Models.Sonnet),
 		fmt.Sprintf("ANTHROPIC_DEFAULT_HAIKU_MODEL=%s", cfg.Models.Haiku),

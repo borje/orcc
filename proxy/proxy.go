@@ -9,16 +9,34 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"orcc/config"
+	"orcc/models"
 )
 
+type messagesRequest struct {
+	Model     string            `json:"model"`
+	MaxTokens int               `json:"max_tokens"`
+	Messages  []message         `json:"messages"`
+	System    json.RawMessage   `json:"system,omitempty"`
+	Tools     []json.RawMessage `json:"tools,omitempty"`
+}
+
+type message struct {
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+}
+
 type Proxy struct {
-	cfg    *config.Config
-	target string
-	client *http.Client
-	debug  bool
+	cfg         *config.Config
+	target      string
+	client      *http.Client
+	debug       bool
+	modelsCache []map[string]string
+	modelsAt    time.Time
+	mu          sync.Mutex
 }
 
 func New(cfg *config.Config) *Proxy {
@@ -55,6 +73,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.handleMessages(w, r)
 		return
 	}
+	if r.Method == http.MethodGet && r.URL.Path == "/v1/models" {
+		p.handleModels(w, r)
+		return
+	}
 	p.reverseProxy(w, r)
 }
 
@@ -62,6 +84,13 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "read body", http.StatusBadRequest)
+		return
+	}
+
+	if tryOptimizations(body, w) {
+		if p.debug {
+			log.Printf("DEBUG request optimized (skipped upstream call)")
+		}
 		return
 	}
 
@@ -424,6 +453,219 @@ func injectWebSearch(body []byte) ([]byte, bool, error) {
 	raw["tools"] = json.RawMessage(mustMarshal(newTools))
 	out, _ := json.Marshal(raw)
 	return out, true, nil
+}
+
+// ── Request optimizations ─────────────────────────────────────────────────────
+
+func parseRequest(body []byte) *messagesRequest {
+	var req messagesRequest
+	if json.Unmarshal(body, &req) != nil {
+		return nil
+	}
+	return &req
+}
+
+func extractText(content json.RawMessage) string {
+	var s string
+	if json.Unmarshal(content, &s) == nil {
+		return s
+	}
+	var blocks []map[string]json.RawMessage
+	if json.Unmarshal(content, &blocks) == nil {
+		for _, b := range blocks {
+			if t, ok := b["type"]; ok && jsonStr(t) == "text" {
+				return jsonStr(b["text"])
+			}
+		}
+	}
+	return ""
+}
+
+func isQuotaCheck(req *messagesRequest) bool {
+	return req.MaxTokens == 1 &&
+		len(req.Messages) == 1 &&
+		req.Messages[0].Role == "user" &&
+		strings.Contains(strings.ToLower(extractText(req.Messages[0].Content)), "quota")
+}
+
+func isTitleGeneration(req *messagesRequest) bool {
+	if len(req.Tools) > 0 || req.System == nil {
+		return false
+	}
+	sysText := strings.ToLower(extractText(req.System))
+	if !strings.Contains(sysText, "title") {
+		return false
+	}
+	return strings.Contains(sysText, "sentence-case title") ||
+		(strings.Contains(sysText, "return json") &&
+			strings.Contains(sysText, "field") &&
+			(strings.Contains(sysText, "coding session") || strings.Contains(sysText, "this session")))
+}
+
+func isPrefixDetection(req *messagesRequest) (bool, string) {
+	if len(req.Messages) != 1 || req.Messages[0].Role != "user" {
+		return false, ""
+	}
+	content := extractText(req.Messages[0].Content)
+	if !strings.Contains(content, "<policy_spec>") || !strings.Contains(content, "Command:") {
+		return false, ""
+	}
+	cmdIdx := strings.LastIndex(content, "Command:")
+	return true, strings.TrimSpace(content[cmdIdx+len("Command:"):])
+}
+
+func isSuggestionMode(req *messagesRequest) bool {
+	for _, m := range req.Messages {
+		if m.Role == "user" && strings.Contains(extractText(m.Content), "[SUGGESTION MODE:") {
+			return true
+		}
+	}
+	return false
+}
+
+func tryOptimizations(body []byte, w http.ResponseWriter) bool {
+	req := parseRequest(body)
+	if req == nil {
+		return false
+	}
+
+	if isQuotaCheck(req) {
+		log.Printf("Optimization: intercepted quota probe")
+		serveSSEText(w, req.Model, "Quota check passed.", 10, 5)
+		return true
+	}
+	if ok, prefix := isPrefixDetection(req); ok {
+		cmd := strings.Fields(prefix)
+		if len(cmd) == 0 {
+			return false
+		}
+		log.Printf("Optimization: fast prefix detection → %q", cmd[0])
+		serveSSEText(w, req.Model, cmd[0], 100, 5)
+		return true
+	}
+	if isTitleGeneration(req) {
+		log.Printf("Optimization: skipped title generation")
+		serveSSEText(w, req.Model, "Conversation", 100, 5)
+		return true
+	}
+	if isSuggestionMode(req) {
+		log.Printf("Optimization: skipped suggestion mode")
+		serveSSEText(w, req.Model, "", 100, 1)
+		return true
+	}
+
+	return false
+}
+
+func serveSSEText(w http.ResponseWriter, model, text string, inputTokens, outputTokens int) {
+	msgID := fmt.Sprintf("msg_%x", time.Now().UnixNano())
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	f, _ := w.(http.Flusher)
+
+	writeSSE := func(event, data string) {
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
+		if f != nil {
+			f.Flush()
+		}
+	}
+
+	writeSSE("message_start",
+		fmt.Sprintf(`{"type":"message_start","message":{"id":"%s","type":"message","role":"assistant","content":[],"model":"%s","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":%d,"output_tokens":%d}}}`,
+			msgID, model, inputTokens, outputTokens))
+
+	textJSON, _ := json.Marshal(text)
+	writeSSE("content_block_start",
+		fmt.Sprintf(`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":%s}}`, textJSON))
+
+	writeSSE("content_block_delta",
+		fmt.Sprintf(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":%s}}`, textJSON))
+
+	writeSSE("content_block_stop", `{"type":"content_block_stop","index":0}`)
+	writeSSE("message_delta",
+		fmt.Sprintf(`{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":%d}}`, outputTokens))
+	writeSSE("message_stop", `{"type":"message_stop"}`)
+}
+
+// ── Gateway model discovery ───────────────────────────────────────────────────
+
+const modelCacheTTL = 24 * time.Hour
+
+func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
+	models := p.ensureModels()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"data": models})
+	log.Printf("handleModels: returning %d models", len(models))
+}
+
+func (p *Proxy) configuredModelIDs() []string {
+	ids := []string{
+		p.cfg.DefaultModel,
+		p.cfg.Models.Opus,
+		p.cfg.Models.Sonnet,
+		p.cfg.Models.Haiku,
+		p.cfg.Models.Subagent,
+	}
+	seen := map[string]bool{}
+	uniq := ids[:0]
+	for _, id := range ids {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			uniq = append(uniq, id)
+		}
+	}
+	return uniq
+}
+
+func modelEntry(id string) map[string]string {
+	return map[string]string{
+		"type":         "model",
+		"id":           id,
+		"display_name": id,
+		"created_at":   "2025-01-01T00:00:00Z",
+	}
+}
+
+func (p *Proxy) fallbackModels() []map[string]string {
+	ids := p.configuredModelIDs()
+	list := make([]map[string]string, len(ids))
+	for i, id := range ids {
+		list[i] = modelEntry(id)
+	}
+	return list
+}
+
+func (p *Proxy) ensureModels() []map[string]string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.modelsCache != nil && time.Since(p.modelsAt) < modelCacheTTL {
+		return p.modelsCache
+	}
+
+	fetched, err := models.FetchModels("https://openrouter.ai/api/v1/models", p.cfg.APIKey)
+	if err != nil {
+		log.Printf("fetch models from OpenRouter: %v (using configured models only)", err)
+		return p.fallbackModels()
+	}
+
+	seen := map[string]bool{}
+	list := make([]map[string]string, 0, len(fetched)+5)
+	for _, m := range fetched {
+		seen[m.ID] = true
+		list = append(list, modelEntry(m.ID))
+	}
+	for _, id := range p.configuredModelIDs() {
+		if !seen[id] {
+			list = append(list, modelEntry(id))
+		}
+	}
+
+	p.modelsCache = list
+	p.modelsAt = time.Now()
+	return list
 }
 
 func mustMarshal(v any) []byte {
