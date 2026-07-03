@@ -17,6 +17,10 @@ func mockServer(t *testing.T) *httptest.Server {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		q := r.URL.Query()
+		if q.Get("output_modalities") != "text" || q.Get("supported_parameters") != "tools" || q.Get("sort") != "most-popular" {
+			t.Errorf("missing catalog filter params: %s", r.URL.RawQuery)
+		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]any{
 				{"id": "anthropic/claude-sonnet-4.6", "pricing": map[string]any{"prompt": "0.000003", "completion": "0.000015"}},
@@ -45,7 +49,6 @@ func TestFetchModels(t *testing.T) {
 		t.Errorf("ms[0].Pricing.Prompt = %q", ms[0].Pricing.Prompt)
 	}
 }
-
 
 func TestFormatLine(t *testing.T) {
 	cases := []struct {

@@ -32,6 +32,14 @@ func FetchModels(baseURL, apiKey string) ([]Model, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Trim the catalog to models Claude Code can actually use: text output with
+	// tool-calling support, ordered most-popular first. This drops image-only,
+	// no-tools, and obscure entries server-side before we ever display them.
+	q := req.URL.Query()
+	q.Set("output_modalities", "text")
+	q.Set("supported_parameters", "tools")
+	q.Set("sort", "most-popular")
+	req.URL.RawQuery = q.Encode()
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := fetchClient.Do(req)
