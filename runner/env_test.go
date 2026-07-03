@@ -35,13 +35,15 @@ func TestBuildEnv(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"ANTHROPIC_BASE_URL":             "http://127.0.0.1:3458",
-		"ANTHROPIC_AUTH_TOKEN":           "sk-test",
-		"ANTHROPIC_API_KEY":              "",
-		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "anthropic/claude-opus-4.7",
-		"ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-sonnet-4.6",
-		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "anthropic/claude-haiku-4.5",
-		"CLAUDE_CODE_SUBAGENT_MODEL":     "anthropic/claude-opus-4.7",
+		"ANTHROPIC_BASE_URL":                   "http://127.0.0.1:3458",
+		"ANTHROPIC_AUTH_TOKEN":                 "sk-test",
+		"ANTHROPIC_API_KEY":                    "",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":         "anthropic/claude-opus-4.7",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL":       "anthropic/claude-sonnet-4.6",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":        "anthropic/claude-haiku-4.5",
+		"CLAUDE_CODE_SUBAGENT_MODEL":           "anthropic/claude-opus-4.7",
+		"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false",
+		"ENABLE_CLAUDEAI_MCP_SERVERS":          "false",
 	}
 
 	for k, v := range want {
