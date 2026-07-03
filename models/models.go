@@ -2,12 +2,45 @@ package models
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
 	"time"
 )
+
+// ErrKeyRejected signals that OpenRouter explicitly rejected the API key
+// (HTTP 401/403). Every other failure — network error, timeout, 429, 5xx — is
+// transient and must NOT be treated as an invalid key, so callers can proceed
+// optimistically instead of forcing a re-key on a flaky connection.
+var ErrKeyRejected = errors.New("OpenRouter rejected the API key")
+
+// ValidateKey checks an API key against the OpenRouter /key endpoint. keyURL
+// should be "https://openrouter.ai/api/v1/key" in production. It returns
+// ErrKeyRejected on 401/403, a generic (transient) error on any other non-2xx
+// or network failure, and nil when the key is accepted.
+func ValidateKey(keyURL, apiKey string) error {
+	req, err := http.NewRequest(http.MethodGet, keyURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := fetchClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("reach OpenRouter: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return ErrKeyRejected
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("key check returned %s", resp.Status)
+	}
+	return nil
+}
 
 type Pricing struct {
 	Prompt     string `json:"prompt"`

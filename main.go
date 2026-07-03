@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -11,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/term"
 	"golang.org/x/sys/unix"
+	"golang.org/x/term"
 
 	"orcc/config"
 	"orcc/daemon"
@@ -265,6 +266,8 @@ func runClaude(args []string) {
 		os.Exit(1)
 	}
 
+	validateKey(cfg)
+
 	if err := ensureProxyRunning(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
@@ -337,6 +340,25 @@ func loadConfig() (*config.Config, error) {
 		cfg.Port = 3458
 	}
 	return cfg, nil
+}
+
+// validateKey checks the configured key against OpenRouter before launch. A
+// rejected key aborts with a clear message; a transient failure (offline,
+// 5xx, rate limit) only warns, since the key is probably fine and OpenRouter
+// will reject it at request time if it isn't.
+func validateKey(cfg *config.Config) {
+	err := models.ValidateKey("https://openrouter.ai/api/v1/key", cfg.APIKey)
+	switch {
+	case errors.Is(err, models.ErrKeyRejected):
+		hint := "your config"
+		if p, perr := config.DefaultPath(); perr == nil {
+			hint = p
+		}
+		fmt.Fprintf(os.Stderr, "OpenRouter rejected your API key.\nCheck it in %s or get a new one at https://openrouter.ai/keys\n", hint)
+		os.Exit(1)
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "warning: could not validate OpenRouter key (%v); continuing\n", err)
+	}
 }
 
 func openLogFile() (*os.File, error) {

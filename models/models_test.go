@@ -2,6 +2,7 @@ package models_test
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -100,6 +101,49 @@ func TestFetchModelsInvalidJSON(t *testing.T) {
 	_, err := models.FetchModels(srv.URL, "key")
 	if err == nil {
 		t.Error("expected error on invalid JSON")
+	}
+}
+
+func TestValidateKey(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		want   error // sentinel to match with errors.Is, or nil for "any error"
+		ok     bool  // expect no error
+	}{
+		{"accepted", http.StatusOK, nil, true},
+		{"unauthorized", http.StatusUnauthorized, models.ErrKeyRejected, false},
+		{"forbidden", http.StatusForbidden, models.ErrKeyRejected, false},
+		{"server error is transient", http.StatusInternalServerError, nil, false},
+		{"rate limited is transient", http.StatusTooManyRequests, nil, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer k" {
+					t.Errorf("missing bearer auth: %q", r.Header.Get("Authorization"))
+				}
+				w.WriteHeader(c.status)
+			}))
+			defer srv.Close()
+
+			err := models.ValidateKey(srv.URL, "k")
+			if c.ok {
+				if err != nil {
+					t.Fatalf("ValidateKey() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateKey() = nil, want error")
+			}
+			if c.want != nil && !errors.Is(err, c.want) {
+				t.Errorf("ValidateKey() = %v, want errors.Is(%v)", err, c.want)
+			}
+			if c.want == nil && errors.Is(err, models.ErrKeyRejected) {
+				t.Errorf("ValidateKey() = %v, want a transient (non-rejected) error", err)
+			}
+		})
 	}
 }
 
