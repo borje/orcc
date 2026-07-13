@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -103,6 +104,14 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	if changed {
 		log.Printf("handleMessages: injected openrouter:web_search")
+	}
+
+	if scoreBody, scoreChanged, err := extractParetoScore(modified); err != nil {
+		log.Printf("extractParetoScore: %v", err)
+	} else if scoreChanged {
+		modified = scoreBody
+		changed = true
+		log.Printf("handleMessages: injected min_coding_score for Pareto model")
 	}
 
 	msgURL := p.target + "/messages"
@@ -666,6 +675,71 @@ func (p *Proxy) ensureModels() []map[string]string {
 	p.modelsCache = list
 	p.modelsAt = time.Now()
 	return list
+}
+
+// ── Pareto router score injection ─────────────────────────────────────────────
+
+// paretoScoreSuffixes maps named tier aliases to min_coding_score values.
+var paretoScoreSuffixes = map[string]float64{
+	"low":    0.5,
+	"mid":    0.7,
+	"medium": 0.7,
+	"high":   0.9,
+}
+
+// extractParetoScore inspects the request body's "model" field. If the model
+// starts with "openrouter/pareto" and ends with a recognized score suffix
+// (numeric 0.0–1.0 or a named alias), the suffix is stripped from the model
+// field and min_coding_score is injected via the pareto-router plugin:
+//
+//	"plugins": [{"id": "pareto-router", "min_coding_score": 0.8}]
+//
+// The ":nitro" suffix is left intact and does not trigger score injection.
+// Other suffixes are left untouched.
+func extractParetoScore(body []byte) ([]byte, bool, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return body, false, nil
+	}
+
+	model := jsonStr(raw["model"])
+	if !strings.HasPrefix(model, "openrouter/pareto") {
+		return body, false, nil
+	}
+
+	lastColon := strings.LastIndex(model, ":")
+	if lastColon < 0 {
+		return body, false, nil
+	}
+
+	base := model[:lastColon]
+	suffix := model[lastColon+1:]
+
+	var score float64
+	if s, ok := paretoScoreSuffixes[suffix]; ok {
+		score = s
+	} else if f, err := strconv.ParseFloat(suffix, 64); err == nil && f >= 0.0 && f <= 1.0 {
+		score = f
+	} else {
+		// Unknown suffix (including :nitro) — pass through unchanged.
+		return body, false, nil
+	}
+
+	raw["model"] = mustMarshal(base)
+
+	plugin := map[string]interface{}{
+		"id":               "pareto-router",
+		"min_coding_score": score,
+	}
+	var plugins []json.RawMessage
+	if pluginsRaw, ok := raw["plugins"]; ok {
+		json.Unmarshal(pluginsRaw, &plugins)
+	}
+	plugins = append(plugins, mustMarshal(plugin))
+	raw["plugins"] = mustMarshal(plugins)
+
+	out, _ := json.Marshal(raw)
+	return out, true, nil
 }
 
 func mustMarshal(v any) []byte {

@@ -114,6 +114,136 @@ func TestInjectWebSearch(t *testing.T) {
 	}
 }
 
+func TestExtractParetoScore(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantModel string
+		wantScore float64
+		wantSet   bool
+	}{
+		{
+			name:      "numeric score",
+			input:     `{"model":"openrouter/pareto-code:0.8","messages":[]}`,
+			wantModel: "openrouter/pareto-code",
+			wantScore: 0.8,
+			wantSet:   true,
+		},
+		{
+			name:      "high alias",
+			input:     `{"model":"openrouter/pareto-code:high","messages":[]}`,
+			wantModel: "openrouter/pareto-code",
+			wantScore: 0.9,
+			wantSet:   true,
+		},
+		{
+			name:      "low alias",
+			input:     `{"model":"openrouter/pareto-code:low","messages":[]}`,
+			wantModel: "openrouter/pareto-code",
+			wantScore: 0.5,
+			wantSet:   true,
+		},
+		{
+			name:      "mid alias",
+			input:     `{"model":"openrouter/pareto-code:mid","messages":[]}`,
+			wantModel: "openrouter/pareto-code",
+			wantScore: 0.7,
+			wantSet:   true,
+		},
+		{
+			name:      "medium alias",
+			input:     `{"model":"openrouter/pareto-code:medium","messages":[]}`,
+			wantModel: "openrouter/pareto-code",
+			wantScore: 0.7,
+			wantSet:   true,
+		},
+		{
+			name:    "no suffix",
+			input:   `{"model":"openrouter/pareto-code","messages":[]}`,
+			wantSet: false,
+		},
+		{
+			name:    "nitro suffix untouched",
+			input:   `{"model":"openrouter/pareto-code:nitro","messages":[]}`,
+			wantSet: false,
+		},
+		{
+			name:    "non-pareto model untouched",
+			input:   `{"model":"anthropic/claude-sonnet-4.6","messages":[]}`,
+			wantSet: false,
+		},
+		{
+			name:    "unknown suffix untouched",
+			input:   `{"model":"openrouter/pareto-code:wat","messages":[]}`,
+			wantSet: false,
+		},
+		{
+			name:    "out-of-range numeric untouched",
+			input:   `{"model":"openrouter/pareto-code:1.5","messages":[]}`,
+			wantSet: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			out, changed, err := extractParetoScore([]byte(tc.input))
+			if err != nil {
+				t.Fatalf("extractParetoScore: %v", err)
+			}
+
+			if !tc.wantSet {
+				if changed {
+					t.Errorf("expected unchanged, got changed")
+				}
+				return
+			}
+
+			if !changed {
+				t.Fatalf("expected changed, got unchanged")
+			}
+
+			var got map[string]json.RawMessage
+			if err := json.Unmarshal(out, &got); err != nil {
+				t.Fatalf("parse output: %v", err)
+			}
+
+			gotModel := jsonStr(got["model"])
+			if gotModel != tc.wantModel {
+				t.Errorf("model: got %q, want %q", gotModel, tc.wantModel)
+			}
+
+			var plugins []map[string]json.RawMessage
+			if err := json.Unmarshal(got["plugins"], &plugins); err != nil || len(plugins) == 0 {
+				t.Fatalf("plugins missing or unparseable")
+			}
+			p := plugins[len(plugins)-1]
+			if id := jsonStr(p["id"]); id != "pareto-router" {
+				t.Errorf("plugin id: got %q, want %q", id, "pareto-router")
+			}
+			var gotScore float64
+			if err := json.Unmarshal(p["min_coding_score"], &gotScore); err != nil {
+				t.Fatalf("parse min_coding_score from plugin: %v", err)
+			}
+			if gotScore != tc.wantScore {
+				t.Errorf("min_coding_score: got %v, want %v", gotScore, tc.wantScore)
+			}
+		})
+	}
+}
+
+func TestExtractParetoScoreInvalidJSON(t *testing.T) {
+	out, changed, err := extractParetoScore([]byte(`{invalid`))
+	if err != nil {
+		t.Fatalf("expected no error on invalid JSON, got: %v", err)
+	}
+	if changed {
+		t.Errorf("expected changed=false on invalid JSON")
+	}
+	if string(out) != "{invalid" {
+		t.Errorf("expected original body returned, got: %s", string(out))
+	}
+}
+
 func TestInjectWebSearchInvalidJSON(t *testing.T) {
 	// Invalid JSON returns original body unchanged (no error)
 	out, changed, err := injectWebSearch([]byte(`{invalid`))

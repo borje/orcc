@@ -59,6 +59,29 @@ models:
 
 You can swap in any model available on OpenRouter — not just Anthropic ones.
 
+## Pareto routing
+
+OpenRouter's [Pareto router](https://openrouter.ai/openrouter/pareto-code) picks the cheapest model that meets a minimum coding quality threshold (`min_coding_score`, 0.0–1.0). Use a postfix on the model ID to set the threshold:
+
+```yaml
+models:
+  opus: "openrouter/pareto-code:high"     # score 0.9 — best coding models
+  sonnet: "openrouter/pareto-code:medium" # score 0.7 — balanced
+  haiku: "openrouter/pareto-code:low"     # score 0.5 — budget
+  subagent: "openrouter/pareto-code:0.85" # exact numeric value
+```
+
+| Postfix | `min_coding_score` |
+|---|---|
+| `:high` | 0.9 |
+| `:medium` / `:mid` | 0.7 |
+| `:low` | 0.5 |
+| `:0.0`–`:1.0` | as specified |
+| `:nitro` | none (OpenRouter speed variant — unchanged) |
+| _(none)_ | none (OpenRouter dashboard default) |
+
+The postfix is stripped from the model ID before the request reaches OpenRouter.
+
 ## How it works
 
 `orcc claude` replaces itself (via `exec`) with the `claude` process after setting:
